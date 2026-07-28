@@ -1,0 +1,66 @@
+# ==========================================
+# ResBridge - 跨服领地/地皮传送桥梁
+# ==========================================
+# 本服在 Velocity 中的名称
+server-name: "99"
+
+# ==========================================
+# 领地 (Residence)
+# ==========================================
+res:
+  # A = 本服装了 Residence，接收传送请求并执行
+  # B = 本服没装 Residence，拦截 /res tp 发送到目标服
+  mode: B
+  # mode=B 时有效：传送目标服务器列表
+  # 优先发送到玩家上次访问的服，无记录则发第一个
+  target-servers:
+    - "99"
+
+# ==========================================
+# 地皮 (PlotSquared)
+# ==========================================
+plot:
+  # A = 本服装了 PlotSquared，接收传送请求并执行
+  # B = 本服没装 PlotSquared，拦截 /plot home 发送到目标服
+  mode: B
+  # mode=B 时有效：传送目标服务器列表
+  target-servers:
+    - "99"
+
+# ==========================================
+# Redis（服务器间通信）
+# ==========================================
+redis:
+  host: "127.0.0.1"
+  port: 6379
+  password: ""
+  database: 0
+  # 传送请求过期时间（秒）
+  expire: 60
+
+# mode=A 时：玩家加入后延迟传送（ticks，20 ticks = 1秒）
+teleport-delay: 40
+
+# ==========================================
+# MySQL（持久化存储领地名称，用于 Tab 补全）
+# 自动建表，表名可自定义
+# ==========================================
+mysql:
+  enabled: false
+  host: "127.0.0.1"
+  port: 3306
+  database: "resbridge"
+  username: "root"
+  password: ""
+  # 表名（不存在时自动创建）
+  table: "resbridge_residences"
+
+# 消息
+messages:
+  prefix: "&6[ResBridge] &r"
+  no-permission: "&c你没有权限执行此指令"
+  invalid-args: "&c指令格式错误，请使用 /res tp [名称] 或 /plot home|visit|tp [参数]"
+  redis-error: "&c服务器通信失败，请稍后再试"
+  switching: "&a正在传送到目标服务器..."
+  reload-success: "&a配置已重载"
+  tp-error: "&c传送失败，请稍后再试"

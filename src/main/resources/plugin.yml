@@ -1,0 +1,43 @@
+name: ResBridge
+version: '1.0.0'
+main: com.resbridge.ResBridge
+api-version: '1.21'
+author: liuxingyu2001
+description: 跨服领地/地皮传送桥梁插件
+softdepend: [Residence, PlotSquared]
+libraries:
+  - redis.clients:jedis:5.1.0
+  - org.apache.commons:commons-pool2:2.12.0
+  - org.json:json:20231013
+  - com.zaxxer:HikariCP:5.1.0
+  - com.mysql:mysql-connector-j:8.3.0
+
+commands:
+  resbridge:
+    description: ResBridge 管理指令
+    usage: /resbridge reload
+    aliases: [rb]
+  res:
+    description: 领地传送指令
+    usage: /res tp [领地名称]
+    permission: resbridge.res
+  plot:
+    description: 地皮传送指令
+    usage: /plot home
+    aliases:
+      - p
+      - p2
+      - plot
+      - plotme
+    permission: resbridge.plot
+
+permissions:
+  resbridge.admin:
+    description: 允许使用 ResBridge 管理指令
+    default: op
+  resbridge.res:
+    description: 允许使用领地传送
+    default: true
+  resbridge.plot:
+    description: 允许使用地皮传送
+    default: true

@@ -72,7 +72,11 @@ public class ServerBCommand implements CommandExecutor, TabCompleter {
             player.sendMessage(plugin.msg("invalid-args"));
             return true;
         }
-        // 把子指令+参数原样透传: "home 2", "visit player1", "tp player1"
+        // visit/v/tp 必须带玩家名
+        if ((sub.equals("visit") || sub.equals("v") || sub.equals("tp")) && args.length < 2) {
+            player.sendMessage(plugin.msg("invalid-args"));
+            return true;
+        }
         String fullArgs = String.join(" ", args);
         return teleport(player, "plot", fullArgs);
     }

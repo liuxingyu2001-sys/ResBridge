@@ -150,7 +150,7 @@ messages:
 mvn clean package
 ```
 
-产物：`target/Liu-ResBridge-1.0.2.jar`
+产物：`target/Liu-ResBridge-1.0.3.jar`
 
 运行时依赖通过 Paper `libraries` 自动下载：Jedis（及其依赖 gson、commons-pool2、slf4j-api）、HikariCP、MySQL Connector/J
 

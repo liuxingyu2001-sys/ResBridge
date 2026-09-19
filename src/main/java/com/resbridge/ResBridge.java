@@ -8,6 +8,10 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.event.HandlerList;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitTask;
+
+import java.util.ArrayList;
+import java.util.List;
 
 public final class ResBridge extends JavaPlugin {
 
@@ -15,6 +19,9 @@ public final class ResBridge extends JavaPlugin {
     private RedisManager redisManager;
     private DatabaseManager databaseManager;
     private ServerAListener aListener;
+    private ServerBCommand bHandler;
+    private ServerPresence presence;
+    private BukkitTask heartbeatTask;
     private boolean resA, plotA, resB, plotB;
 
     public static ResBridge getInstance() {
@@ -51,6 +58,10 @@ public final class ResBridge extends JavaPlugin {
      * 按配置注册 A 模式监听与 B 模式指令，reload 时可重复调用以切换角色。
      */
     private void applyModes() {
+        if (bHandler != null) {
+            HandlerList.unregisterAll(bHandler);
+            bHandler = null;
+        }
         String resMode = getConfig().getString("res.mode", "B").toUpperCase();
         String plotMode = getConfig().getString("plot.mode", "B").toUpperCase();
         resA = "A".equals(resMode);
@@ -80,6 +91,7 @@ public final class ResBridge extends JavaPlugin {
         if (resB || plotB) {
             getServer().getMessenger().registerOutgoingPluginChannel(this, "BungeeCord");
             ServerBCommand handler = new ServerBCommand(this, resB, plotB);
+            bHandler = handler;
             getServer().getPluginManager().registerEvents(handler, this);
             if (resB && resCmd != null) {
                 resCmd.setExecutor(handler);
@@ -102,6 +114,43 @@ public final class ResBridge extends JavaPlugin {
                     Bukkit.dispatchCommand(sender, "plotsquared:plot " + String.join(" ", args)));
             plotCmd.setTabCompleter(null);
         }
+        startHeartbeat();
+    }
+
+    private void startHeartbeat() {
+        if (redisManager == null || (!resA && !plotA)) return;
+        String server = getConfig().getString("server-name", "").trim();
+        if (server.isEmpty()) {
+            getLogger().warning("未配置 server-name，其他服务器将无法检测本服在线状态");
+            return;
+        }
+        List<String> types = new ArrayList<>();
+        if (resA && getServer().getPluginManager().isPluginEnabled("Residence")) types.add("res");
+        if (plotA && getServer().getPluginManager().isPluginEnabled("PlotSquared")) types.add("plot");
+        ServerPresence current = redisManager.createPresence(server, types);
+        presence = current;
+        heartbeatTask = getServer().getScheduler().runTaskTimerAsynchronously(this, () -> {
+            try {
+                current.refresh();
+            } catch (Exception e) {
+                getLogger().warning("发布服务器在线状态失败: " + e.getMessage());
+            }
+        }, 0L, 40L);
+    }
+
+    private void stopHeartbeat() {
+        if (heartbeatTask != null) {
+            heartbeatTask.cancel();
+            heartbeatTask = null;
+        }
+        if (presence != null) {
+            try {
+                presence.close();
+            } catch (Exception e) {
+                getLogger().warning("清理服务器在线状态失败，将等待心跳过期: " + e.getMessage());
+            }
+            presence = null;
+        }
     }
 
     private static String modeName(boolean a, boolean b) {
@@ -117,6 +166,7 @@ public final class ResBridge extends JavaPlugin {
                 return true;
             }
             reloadConfig();
+            stopHeartbeat();
             if (redisManager != null) redisManager.close();
             if (databaseManager != null) databaseManager.close();
             redisManager = null;
@@ -144,6 +194,7 @@ public final class ResBridge extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        stopHeartbeat();
         if (redisManager != null) redisManager.close();
         if (databaseManager != null) databaseManager.close();
         instance = null;

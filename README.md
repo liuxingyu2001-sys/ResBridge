@@ -9,6 +9,7 @@
 - **地皮传送**：`/plot home|visit|tp [参数]`，支持 `p` / `p2` / `plotme` 等别名
 - **自动领取地皮**：`/plot auto`，切换到目标地皮服后由 PlotSquared 执行领取，支持 Tab 补全
 - **多服务器路由**：按类型自动路由到对应服务器，优先送回玩家上次访问的服
+- **静默切服与离线提示**：正常切服无额外提示；目标服离线时直接提示暂未开放，连接超时则提示无法连接
 - **MySQL 持久化**：可选 MySQL 存储领地名称列表，自动建表，表名可配置
 - **智能回退**：反射获取领地列表（ClassLoader 修正）→ MySQL 历史数据 → Redis 缓存
 - **指令转发**：A 模式自动将 `/res` `/plot` 转发给真实插件，不会覆盖
@@ -29,10 +30,10 @@
 玩家在B服输入 /res tp myhome
         │
         ▼
-  B服: 写入 Redis ──→ resbridge:tp:{uuid} = "res:myhome"
+  B服: 选择上次访问的领地服 → 检查在线心跳 → 写入待执行请求
         │
         ▼
-  B服: 查询上次访问的领地服 → 通过 Velocity 切换玩家
+  B服: 通过 Velocity 静默切换玩家
         │
         ▼
   A服: PlayerJoinEvent → 读取 Redis → 命名空间指令执行 + 重试
@@ -41,6 +42,8 @@
 ## 部署
 
 同一个 jar 安装到所有相关服务器，通过 `res.mode` / `plot.mode` 配置每台服的角色。
+
+发送端和接收端都需要更新到支持在线检测的版本，接收端的 `server-name` 必须与 Velocity 中的名称及发送端的目标服配置一致。A 模式在对应插件启用时每 2 秒发布 Redis 心跳（无需在线玩家），正常关服立即撤销，崩溃或断网后最多约 6 秒过期。发送端发现离线时不会发起切服或保存待执行指令；已发起连接但 5 秒后玩家仍留在本服，会清理本次请求并提示连接失败。
 
 ### 场景一：大厅 + 全装服
 
@@ -126,7 +129,8 @@ mysql:
 # 消息（支持 & 颜色代码）
 messages:
   prefix: "&6[ResBridge] &r"
-  switching: "&a正在传送到目标服务器..."
+  server-offline: "&c目标服务器暂未开放，请稍后再试"
+  connect-failed: "&c暂时无法连接目标服务器，请稍后再试"
   # ... 其他消息见默认配置
 ```
 
@@ -139,6 +143,8 @@ messages:
 | `resbridge.admin` | 管理指令（reload） | `op` |
 
 ## 构建
+
+测试需要本机安装 `redis-server`，会启动独立临时 Redis 验证在线检测与请求清理，测试结束后自动关闭。
 
 ```bash
 mvn clean package
@@ -154,6 +160,7 @@ mvn clean package
 src/main/java/com/resbridge/
 ├── ResBridge.java         # 主类，按类型路由 A/B 模式，reload
 ├── RedisManager.java      # Redis 通信（传送请求、领地缓存、服务器记忆）
+├── ServerPresence.java    # 目标服在线心跳与关服清理
 ├── DatabaseManager.java   # MySQL 持久化（自建表，领地名称存储）
 ├── ServerAListener.java   # A服：监听加入 → 执行传送 + 反射/MySQL 获取领地列表
 └── ServerBCommand.java    # B服：指令处理 + 跨服切换 + Tab 补全

@@ -17,6 +17,20 @@ public class RedisManager {
     private final int expireSeconds;
     private static final int LIST_EXPIRE = 3600;
 
+    RedisManager(JedisPool pool, int expireSeconds) {
+        this.pool = pool;
+        this.expireSeconds = expireSeconds;
+    }
+
+    public ServerPresence createPresence(String server, List<String> types) {
+        return new ServerPresence(pool, server, types);
+    }
+
+    public boolean isServerOnline(String server, String type) {
+        // 通信错误交给调用方处理，不能误报成目标服关闭。
+        return ServerPresence.isOnline(pool, server, type);
+    }
+
     public RedisManager(ResBridge plugin) {
         String host = plugin.getConfig().getString("redis.host", "127.0.0.1");
         int port = plugin.getConfig().getInt("redis.port", 6379);
@@ -39,10 +53,13 @@ public class RedisManager {
         }
     }
 
-    public boolean setPendingTeleport(UUID uuid, String type, String target) {
+    public boolean setPendingTeleport(UUID uuid, String type, String target, UUID requestId) {
         try (Jedis jedis = pool.getResource()) {
             String value = type + ":" + (target != null ? target : "");
-            jedis.setex(tpPrefix + uuid, expireSeconds, value);
+            jedis.eval("redis.call('setex', KEYS[1], ARGV[1], ARGV[2]); "
+                            + "redis.call('setex', KEYS[2], ARGV[1], ARGV[3]); return 1",
+                    List.of(tpPrefix + uuid, tpPrefix + uuid + ":owner"),
+                    List.of(Integer.toString(expireSeconds), value, requestId.toString()));
             return true;
         } catch (Exception e) {
             ResBridge.getInstance().getLogger().warning("Redis 写入传送请求失败: " + e.getMessage());
@@ -60,7 +77,16 @@ public class RedisManager {
 
     public void deletePendingTeleport(UUID uuid) {
         try (Jedis jedis = pool.getResource()) {
-            jedis.del(tpPrefix + uuid);
+            jedis.del(tpPrefix + uuid, tpPrefix + uuid + ":owner");
+        } catch (Exception ignored) {
+        }
+    }
+
+    public void deletePendingTeleport(UUID uuid, UUID requestId) {
+        try (Jedis jedis = pool.getResource()) {
+            // 超时清理只删除自己的请求，避免误删玩家随后发起的新请求。
+            jedis.eval("if redis.call('get', KEYS[2]) == ARGV[1] then return redis.call('del', KEYS[1], KEYS[2]) end return 0",
+                    List.of(tpPrefix + uuid, tpPrefix + uuid + ":owner"), List.of(requestId.toString()));
         } catch (Exception ignored) {
         }
     }

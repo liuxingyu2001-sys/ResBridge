@@ -27,6 +27,7 @@ public class ServerBCommand implements CommandExecutor, TabCompleter, Listener {
 
     private final Map<UUID, CacheEntry> resCache = new ConcurrentHashMap<>();
     private final Set<UUID> refreshingResCache = ConcurrentHashMap.newKeySet();
+    private final Map<UUID, UUID> pendingConnections = new ConcurrentHashMap<>();
     private static final long CACHE_TTL = 30_000;
     private static final int CACHE_MAX_SIZE = 256;
 
@@ -94,27 +95,58 @@ public class ServerBCommand implements CommandExecutor, TabCompleter, Listener {
             player.sendMessage(plugin.msg("redis-error"));
             return true;
         }
-        // Redis 网络 IO 放到异步线程，避免阻塞主线程
+        UUID uuid = player.getUniqueId();
+        UUID requestId = UUID.randomUUID();
+        if (pendingConnections.putIfAbsent(uuid, requestId) != null) return true;
+        List<String> servers = List.copyOf(plugin.getConfig().getStringList(type + ".target-servers"));
+        // Redis 网络 IO 放到异步线程，避免阻塞主线程。
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            if (!redis.setPendingTeleport(player.getUniqueId(), type, target)) {
-                sendIfOnline(player, "redis-error");
-                return;
-            }
-            String server = getTargetServer(player.getUniqueId(), type);
-            if (server == null) {
-                sendIfOnline(player, "redis-error");
+            final String server;
+            try {
+                server = getTargetServer(uuid, type, servers, redis);
+                if (server == null || !redis.isServerOnline(server, type)) {
+                    failConnection(player, redis, requestId, "server-offline");
+                    return;
+                }
+                // 确认目标服在线后才写入请求，关服时不留下待执行指令。
+                if (!redis.setPendingTeleport(uuid, type, target, requestId)) {
+                    failConnection(player, redis, requestId, "redis-error");
+                    return;
+                }
+            } catch (Exception e) {
+                failConnection(player, redis, requestId, "redis-error");
                 return;
             }
             Bukkit.getScheduler().runTask(plugin, () -> {
-                if (!player.isOnline()) return;
-                player.sendMessage(plugin.msg("switching"));
+                if (!player.isOnline()) {
+                    Bukkit.getScheduler().runTaskAsynchronously(plugin, () ->
+                            failConnection(player, redis, requestId, null));
+                    return;
+                }
                 ByteArrayDataOutput out = ByteStreams.newDataOutput();
                 out.writeUTF("Connect");
                 out.writeUTF(server);
                 player.sendPluginMessage(plugin, "BungeeCord", out.toByteArray());
+                // 代理没有 Connect 结果回调；5 秒后仍在本服视为连接失败。
+                Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                    if (!player.isOnline()) {
+                        pendingConnections.remove(uuid, requestId);
+                        return;
+                    }
+                    Bukkit.getScheduler().runTaskAsynchronously(plugin, () ->
+                            failConnection(player, redis, requestId, "connect-failed"));
+                }, 100L);
             });
         });
         return true;
+    }
+
+    /** 在异步线程清理请求，避免连接失败后下一次进服误执行 auto 等指令。 */
+    private void failConnection(Player player, RedisManager redis, UUID requestId, String message) {
+        redis.deletePendingTeleport(player.getUniqueId(), requestId);
+        if (pendingConnections.remove(player.getUniqueId(), requestId) && message != null) {
+            sendIfOnline(player, message);
+        }
     }
 
     private void sendIfOnline(Player player, String msgKey) {
@@ -123,11 +155,9 @@ public class ServerBCommand implements CommandExecutor, TabCompleter, Listener {
         });
     }
 
-    private String getTargetServer(UUID uuid, String type) {
-        List<String> servers = plugin.getConfig().getStringList(type + ".target-servers");
+    private String getTargetServer(UUID uuid, String type, List<String> servers, RedisManager redis) {
         if (servers.isEmpty()) return null;
 
-        RedisManager redis = plugin.getRedisManager();
         if (redis != null) {
             String last = redis.getLastServer(uuid, type);
             if (last != null && servers.contains(last)) return last;

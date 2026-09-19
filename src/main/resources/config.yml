@@ -61,6 +61,7 @@ messages:
   no-permission: "&c你没有权限执行此指令"
   invalid-args: "&c指令格式错误，请使用 /res tp [名称] 或 /plot home|visit|tp|auto [参数]"
   redis-error: "&c服务器通信失败，请稍后再试"
-  switching: "&a正在传送到目标服务器..."
+  server-offline: "&c目标服务器暂未开放，请稍后再试"
+  connect-failed: "&c暂时无法连接目标服务器，请稍后再试"
   reload-success: "&a配置已重载"
   tp-error: "&c传送失败，请稍后再试"

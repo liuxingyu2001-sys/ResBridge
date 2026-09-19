@@ -47,27 +47,42 @@ public class ServerAListener implements Listener {
                     boolean shouldHandle = ("res".equals(type) && handleRes) || ("plot".equals(type) && handlePlot);
                     if (shouldHandle) {
                         redis.deletePendingTeleport(player.getUniqueId());
-                        int delay = plugin.getConfig().getInt("teleport-delay", 40);
-                        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                        Bukkit.getScheduler().runTask(plugin, () -> {
                             if (!player.isOnline()) return;
-                            executeWithRetry(player, data, 3);
-                        }, delay);
+                            int delay = plugin.getConfig().getInt("teleport-delay", 40);
+                            Bukkit.getScheduler().runTaskLater(plugin, () ->
+                                    executeWithRetry(player, data, 3), delay);
+                        });
                     }
                 }
             }
+        });
 
-            // 写入领地列表供B服补全
-            if (handleRes) {
-                List<String> resNames = getResidenceNames(player);
-                if (!resNames.isEmpty()) {
+        // 写入领地列表供B服补全。
+        // 反射会读取 Residence 内部数据结构（非线程安全），必须在主线程执行；
+        // MySQL 查询与 Redis 写入是网络 IO，回到异步线程执行。
+        if (handleRes) {
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                if (!player.isOnline()) return;
+                List<String> reflected = getResidenceNamesByReflection(player);
+                Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+                    List<String> resNames = reflected;
+                    if (resNames.isEmpty()) {
+                        // 方式2：MySQL 查询（之前反射成功时存入的数据）
+                        DatabaseManager db = plugin.getDatabaseManager();
+                        if (db != null && db.isEnabled()) {
+                            resNames = db.getResidenceNames(player.getUniqueId());
+                        }
+                    }
+                    if (resNames.isEmpty()) return;
                     redis.setResList(player.getUniqueId(), resNames);
                     DatabaseManager db = plugin.getDatabaseManager();
                     if (db != null && db.isEnabled()) {
                         db.saveResidenceNames(player.getUniqueId(), resNames);
                     }
-                }
-            }
-        });
+                });
+            }, 20L);
+        }
     }
 
     private void executeWithRetry(Player player, String data, int retries) {
@@ -111,22 +126,6 @@ public class ServerAListener implements Listener {
                 executeWithRetry(player, data, retries - 1);
             }, 20);
         }
-    }
-
-    @SuppressWarnings("unchecked")
-    private List<String> getResidenceNames(Player player) {
-        // 方式1：反射（使用 Residence 的 ClassLoader 解决 Paper 类加载隔离）
-        List<String> names = getResidenceNamesByReflection(player);
-        if (!names.isEmpty()) return names;
-
-        // 方式2：MySQL 查询（之前反射成功时存入的数据）
-        DatabaseManager db = plugin.getDatabaseManager();
-        if (db != null && db.isEnabled()) {
-            names = db.getResidenceNames(player.getUniqueId());
-            if (!names.isEmpty()) return names;
-        }
-
-        return List.of();
     }
 
     @SuppressWarnings("unchecked")

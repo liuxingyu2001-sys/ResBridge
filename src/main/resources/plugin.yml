@@ -1,5 +1,5 @@
 name: ResBridge
-version: '1.0.0'
+version: '1.0.2'
 main: com.resbridge.ResBridge
 api-version: '1.21'
 author: liuxingyu2001
@@ -8,7 +8,8 @@ softdepend: [Residence, PlotSquared]
 libraries:
   - redis.clients:jedis:5.1.0
   - org.apache.commons:commons-pool2:2.12.0
-  - org.json:json:20231013
+  - com.google.code.gson:gson:2.10.1
+  - org.slf4j:slf4j-api:2.0.9
   - com.zaxxer:HikariCP:5.1.0
   - com.mysql:mysql-connector-j:8.3.0
 
@@ -22,12 +23,11 @@ commands:
     usage: /res tp [领地名称]
     permission: resbridge.res
   plot:
-    description: 地皮传送指令
-    usage: /plot home
+    description: 地皮传送与自动领取指令
+    usage: /plot home|visit|tp|auto [参数]
     aliases:
       - p
       - p2
-      - plot
       - plotme
     permission: resbridge.plot
 
@@ -39,5 +39,5 @@ permissions:
     description: 允许使用领地传送
     default: true
   resbridge.plot:
-    description: 允许使用地皮传送
+    description: 允许使用地皮传送与自动领取转发
     default: true

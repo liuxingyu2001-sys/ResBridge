@@ -25,6 +25,11 @@ public class DatabaseManager {
         String username = plugin.getConfig().getString("mysql.username", "root");
         String password = plugin.getConfig().getString("mysql.password", "");
         this.table = plugin.getConfig().getString("mysql.table", "resbridge_residences");
+        // 表名会直接拼进 SQL，只允许安全字符，防止配置错误导致 SQL 异常
+        if (table == null || !table.matches("[A-Za-z0-9_]+")) {
+            plugin.getLogger().warning("mysql.table 配置无效（只允许字母、数字、下划线），使用默认表名");
+            this.table = "resbridge_residences";
+        }
 
         HikariConfig config = new HikariConfig();
         config.setJdbcUrl("jdbc:mysql://" + host + ":" + port + "/" + database
@@ -60,19 +65,27 @@ public class DatabaseManager {
     public void saveResidenceNames(UUID uuid, List<String> names) {
         if (dataSource == null || names.isEmpty()) return;
         try (Connection conn = dataSource.getConnection()) {
-            // 先删旧数据
-            try (PreparedStatement del = conn.prepareStatement("DELETE FROM `" + table + "` WHERE `uuid` = ?")) {
-                del.setString(1, uuid.toString());
-                del.executeUpdate();
-            }
-            // 批量插入
-            try (PreparedStatement ins = conn.prepareStatement("INSERT INTO `" + table + "` (`uuid`, `residence_name`) VALUES (?, ?)")) {
-                for (String name : names) {
-                    ins.setString(1, uuid.toString());
-                    ins.setString(2, name);
-                    ins.addBatch();
+            // 删旧 + 插新放在同一事务，失败时回滚，避免清空后没写进去
+            conn.setAutoCommit(false);
+            try {
+                try (PreparedStatement del = conn.prepareStatement("DELETE FROM `" + table + "` WHERE `uuid` = ?")) {
+                    del.setString(1, uuid.toString());
+                    del.executeUpdate();
                 }
-                ins.executeBatch();
+                try (PreparedStatement ins = conn.prepareStatement("INSERT INTO `" + table + "` (`uuid`, `residence_name`) VALUES (?, ?)")) {
+                    for (String name : names) {
+                        ins.setString(1, uuid.toString());
+                        ins.setString(2, name);
+                        ins.addBatch();
+                    }
+                    ins.executeBatch();
+                }
+                conn.commit();
+            } catch (Exception e) {
+                conn.rollback();
+                throw e;
+            } finally {
+                conn.setAutoCommit(true);
             }
         } catch (Exception e) {
             ResBridge.getInstance().getLogger().warning("MySQL 保存领地列表失败: " + e.getMessage());

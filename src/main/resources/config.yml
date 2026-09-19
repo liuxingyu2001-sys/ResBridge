@@ -21,7 +21,7 @@ res:
 # ==========================================
 plot:
   # A = 本服装了 PlotSquared，接收传送请求并执行
-  # B = 本服没装 PlotSquared，拦截 /plot home 发送到目标服
+  # B = 本服没装 PlotSquared，拦截 /plot home|visit|tp|auto 发送到目标服
   mode: B
   # mode=B 时有效：传送目标服务器列表
   target-servers:
@@ -59,7 +59,7 @@ mysql:
 messages:
   prefix: "&6[ResBridge] &r"
   no-permission: "&c你没有权限执行此指令"
-  invalid-args: "&c指令格式错误，请使用 /res tp [名称] 或 /plot home|visit|tp [参数]"
+  invalid-args: "&c指令格式错误，请使用 /res tp [名称] 或 /plot home|visit|tp|auto [参数]"
   redis-error: "&c服务器通信失败，请稍后再试"
   switching: "&a正在传送到目标服务器..."
   reload-success: "&a配置已重载"

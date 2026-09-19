@@ -45,6 +45,7 @@ public class RedisManager {
             jedis.setex(tpPrefix + uuid, expireSeconds, value);
             return true;
         } catch (Exception e) {
+            ResBridge.getInstance().getLogger().warning("Redis 写入传送请求失败: " + e.getMessage());
             return false;
         }
     }

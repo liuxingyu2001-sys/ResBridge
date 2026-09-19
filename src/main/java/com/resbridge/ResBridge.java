@@ -5,6 +5,8 @@ import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
+import org.bukkit.command.PluginCommand;
+import org.bukkit.event.HandlerList;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class ResBridge extends JavaPlugin {
@@ -12,6 +14,7 @@ public final class ResBridge extends JavaPlugin {
     private static ResBridge instance;
     private RedisManager redisManager;
     private DatabaseManager databaseManager;
+    private ServerAListener aListener;
     private boolean resA, plotA, resB, plotB;
 
     public static ResBridge getInstance() {
@@ -22,13 +25,6 @@ public final class ResBridge extends JavaPlugin {
     public void onEnable() {
         instance = this;
         saveDefaultConfig();
-
-        String resMode = getConfig().getString("res.mode", "B").toUpperCase();
-        String plotMode = getConfig().getString("plot.mode", "B").toUpperCase();
-        resA = "A".equals(resMode);
-        plotA = "A".equals(plotMode);
-        resB = "B".equals(resMode);
-        plotB = "B".equals(plotMode);
 
         try {
             redisManager = new RedisManager(this);
@@ -42,39 +38,76 @@ public final class ResBridge extends JavaPlugin {
             databaseManager = new DatabaseManager(this);
         } catch (Exception e) {
             getLogger().warning("MySQL 连接失败（领地补全将不可用）: " + e.getMessage());
+            databaseManager = null;
         }
 
-        // A模式：注册加入监听
-        if (resA || plotA) {
-            getServer().getPluginManager().registerEvents(new ServerAListener(this, resA, plotA), this);
+        applyModes();
+
+        getCommand("resbridge").setExecutor(this::onResBridgeCommand);
+        getLogger().info("ResBridge 已启用 (res=" + modeName(resA, resB) + ", plot=" + modeName(plotA, plotB) + ")");
+    }
+
+    /**
+     * 按配置注册 A 模式监听与 B 模式指令，reload 时可重复调用以切换角色。
+     */
+    private void applyModes() {
+        String resMode = getConfig().getString("res.mode", "B").toUpperCase();
+        String plotMode = getConfig().getString("plot.mode", "B").toUpperCase();
+        resA = "A".equals(resMode);
+        plotA = "A".equals(plotMode);
+        resB = "B".equals(resMode);
+        plotB = "B".equals(plotMode);
+        if (!resA && !resB) getLogger().warning("res.mode 配置无效: " + resMode + "（应为 A 或 B）");
+        if (!plotA && !plotB) getLogger().warning("plot.mode 配置无效: " + plotMode + "（应为 A 或 B）");
+
+        // A模式：注册加入监听（先注销旧监听，支持 reload 切换角色）
+        if (aListener != null) {
+            HandlerList.unregisterAll(aListener);
+            aListener = null;
         }
+        if (resA || plotA) {
+            aListener = new ServerAListener(this, resA, plotA);
+            getServer().getPluginManager().registerEvents(aListener, this);
+        }
+
+        PluginCommand resCmd = getCommand("res");
+        PluginCommand plotCmd = getCommand("plot");
+        // 与真实插件指令名冲突时注册会 fallback，getCommand 可能拿不到
+        if (resCmd == null) getLogger().severe("指令 res 注册失败（可能与其他插件冲突），领地功能不可用");
+        if (plotCmd == null) getLogger().severe("指令 plot 注册失败（可能与其他插件冲突），地皮功能不可用");
 
         // B模式：注册指令
         if (resB || plotB) {
             getServer().getMessenger().registerOutgoingPluginChannel(this, "BungeeCord");
             ServerBCommand handler = new ServerBCommand(this, resB, plotB);
-            if (resB) {
-                getCommand("res").setExecutor(handler);
-                getCommand("res").setTabCompleter(handler);
+            getServer().getPluginManager().registerEvents(handler, this);
+            if (resB && resCmd != null) {
+                resCmd.setExecutor(handler);
+                resCmd.setTabCompleter(handler);
             }
-            if (plotB) {
-                getCommand("plot").setExecutor(handler);
-                getCommand("plot").setTabCompleter(handler);
+            if (plotB && plotCmd != null) {
+                plotCmd.setExecutor(handler);
+                plotCmd.setTabCompleter(handler);
             }
         }
 
         // A模式：将本插件注册的指令转发给真实插件，避免覆盖
-        if (resA) {
-            getCommand("res").setExecutor((sender, cmd, label, args) ->
+        if (resA && resCmd != null) {
+            resCmd.setExecutor((sender, cmd, label, args) ->
                     Bukkit.dispatchCommand(sender, "residence:res " + String.join(" ", args)));
+            resCmd.setTabCompleter(null);
         }
-        if (plotA) {
-            getCommand("plot").setExecutor((sender, cmd, label, args) ->
+        if (plotA && plotCmd != null) {
+            plotCmd.setExecutor((sender, cmd, label, args) ->
                     Bukkit.dispatchCommand(sender, "plotsquared:plot " + String.join(" ", args)));
+            plotCmd.setTabCompleter(null);
         }
+    }
 
-        getCommand("resbridge").setExecutor(this::onResBridgeCommand);
-        getLogger().info("ResBridge 已启用 (res=" + resMode + ", plot=" + plotMode + ")");
+    private static String modeName(boolean a, boolean b) {
+        if (a) return "A";
+        if (b) return "B";
+        return "无效";
     }
 
     private boolean onResBridgeCommand(CommandSender sender, Command command, String label, String[] args) {
@@ -86,14 +119,23 @@ public final class ResBridge extends JavaPlugin {
             reloadConfig();
             if (redisManager != null) redisManager.close();
             if (databaseManager != null) databaseManager.close();
+            redisManager = null;
+            databaseManager = null;
+            boolean redisOk = true;
             try {
                 redisManager = new RedisManager(this);
-                databaseManager = new DatabaseManager(this);
-                sender.sendMessage(msg("reload-success"));
             } catch (Exception e) {
-                sender.sendMessage(msg("redis-error"));
+                redisOk = false;
                 getLogger().severe("Redis 重连失败: " + e.getMessage());
             }
+            try {
+                databaseManager = new DatabaseManager(this);
+            } catch (Exception e) {
+                getLogger().warning("MySQL 重连失败（领地补全将不可用）: " + e.getMessage());
+                databaseManager = null;
+            }
+            applyModes();
+            sender.sendMessage(msg(redisOk ? "reload-success" : "redis-error"));
             return true;
         }
         sender.sendMessage(colorize("&6/ResBridge reload &r- 重载配置"));
@@ -104,6 +146,7 @@ public final class ResBridge extends JavaPlugin {
     public void onDisable() {
         if (redisManager != null) redisManager.close();
         if (databaseManager != null) databaseManager.close();
+        instance = null;
     }
 
     public RedisManager getRedisManager() {

@@ -7,12 +7,13 @@
 - **按类型独立角色**：领地和地皮各自配置 A（接收端）或 B（发送端），同一台服可同时担任不同角色
 - **领地传送**：`/res tp [名称]`，支持领地名称 Tab 补全
 - **地皮传送**：`/plot home|visit|tp [参数]`，支持 `p` / `p2` / `plotme` 等别名
+- **自动领取地皮**：`/plot auto`，切换到目标地皮服后由 PlotSquared 执行领取，支持 Tab 补全
 - **多服务器路由**：按类型自动路由到对应服务器，优先送回玩家上次访问的服
 - **MySQL 持久化**：可选 MySQL 存储领地名称列表，自动建表，表名可配置
 - **智能回退**：反射获取领地列表（ClassLoader 修正）→ MySQL 历史数据 → Redis 缓存
 - **指令转发**：A 模式自动将 `/res` `/plot` 转发给真实插件，不会覆盖
 - **重试机制**：传送失败自动重试（最多 3 次，间隔 1 秒）
-- **热重载**：`/resbridge reload` 无需重启
+- **热重载**：`/resbridge reload` 无需重启，支持在线切换 A/B 角色
 
 ## 环境要求
 
@@ -72,9 +73,12 @@
 | `/plot home [序号]` | 回自己的地皮 | `resbridge.plot` |
 | `/plot visit <玩家>` | 访问他人的地皮 | `resbridge.plot` |
 | `/plot tp <玩家>` | 传送到他人的地皮 | `resbridge.plot` |
+| `/plot auto` | 自动领取目标服的空闲地皮 | `resbridge.plot` |
 | `/resbridge reload` | 重载配置 | `resbridge.admin` |
 
 `/plot` 别名：`/p`、`/p2`、`/plotme`；子指令别名：`h` = `home`，`v` = `visit`
+
+`/plot auto` 同样支持 `/p auto` 等命令别名，优先前往上次访问的地皮服，否则前往 `plot.target-servers` 中的第一台服。领取以玩家身份执行，所需 PlotSquared 权限、地皮额度及费用由目标服检查；附加参数会原样转发给 PlotSquared。
 
 ### A 模式（接收端）
 
@@ -131,7 +135,7 @@ messages:
 | 权限 | 说明 | 默认 |
 |------|------|------|
 | `resbridge.res` | 领地传送 | `true` |
-| `resbridge.plot` | 地皮传送 | `true` |
+| `resbridge.plot` | 地皮传送与自动领取转发 | `true` |
 | `resbridge.admin` | 管理指令（reload） | `op` |
 
 ## 构建
@@ -140,9 +144,9 @@ messages:
 mvn clean package
 ```
 
-产物：`target/Liu-ResBridge-1.0.0.jar`（约 23KB）
+产物：`target/Liu-ResBridge-1.0.2.jar`
 
-运行时依赖通过 Paper `libraries` 自动下载：Jedis、HikariCP、MySQL Connector/J
+运行时依赖通过 Paper `libraries` 自动下载：Jedis（及其依赖 gson、commons-pool2、slf4j-api）、HikariCP、MySQL Connector/J
 
 ## 项目结构
 
